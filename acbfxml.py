@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(f'comicapi.metadata.{__name__}')
 
 
-class ACBF(Tag):
+class ACBFXML(Tag):
     enabled = True
 
     id = 'acbf'
