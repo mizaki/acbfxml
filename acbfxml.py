@@ -640,12 +640,12 @@ class ACBFXML(Tag):
 
         anno = book_info.findall('annotation', ns)
         for d in anno:
-            # Multiple languages, priority is lang attrib: None (missing), en, whatever is found
+            # Multiple languages, priority is lang attrib: None (missing)->en->whatever is found
             lang = d.get('lang', '')
             if lang == '':
                 md.description = annotation_to_string(d)
                 break
-            elif md.description is None and lang == 'en':
+            elif lang == 'en':
                 md.description = annotation_to_string(d)
             elif md.description is None:
                 md.description = annotation_to_string(d)
