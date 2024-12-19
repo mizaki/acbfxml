@@ -32,13 +32,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(f'comicapi.metadata.{__name__}')
 
 
-class ACBFXML(Tag):
+class ACBF(Tag):
     enabled = True
 
     id = 'acbf'
 
     def __init__(self, version: str) -> None:
         super().__init__(version)
+        # Record the acbf versions we support
+        self.namespaces = {'http://www.acbf.info/xml/acbf/1.1', 'http://www.acbf.info/xml/acbf/1.2'}
 
         self.file: str | None = None
         self.supported_attributes = {
@@ -132,7 +134,6 @@ class ACBFXML(Tag):
         parsable_credits.extend(GenericMetadata.editor_synonyms)
         parsable_credits.extend(GenericMetadata.translator_synonyms)
         parsable_credits.append('adapter')
-        parsable_credits.append('artist')
         parsable_credits.append('photographer')
         parsable_credits.append('assistant editor')
         parsable_credits.append('other')
@@ -145,6 +146,14 @@ class ACBFXML(Tag):
     def _bytes_from_metadata(self, metadata: GenericMetadata, xml: bytes = b'') -> bytes:
         root = self._convert_metadata_to_xml(metadata, xml)
         return ET.tostring(root, encoding='utf-8', xml_declaration=True)
+
+    def _remove_acbf_xml_namespaces(self, root: ET.Element) -> None:
+        # Remove all namespaces because it's too complicated otherwise.
+        # This can cause issues if someone decides to actually use namespaces when writing an acbf file.
+        # This shouldn't matter as the official ACBF editor does the same thing
+        for ele in root.iter():
+            if ele.tag.startswith('{'):
+                ele.tag = ele.tag.split('}')[1]
 
     def _convert_metadata_to_xml(self, metadata: GenericMetadata, xml: bytes = b'') -> ET.Element:
         def add_element(element: ET.Element, sub_element: str, text: str = '', attribs: dict[str, str] | None = None) -> None:
@@ -214,8 +223,7 @@ class ACBFXML(Tag):
                 element.attrib[k] = v
 
         def clear_element(full_ele: str) -> None:
-            *element_path_parts, element_name = full_ele.split('/')
-            element_path = '/'.join(element_path_parts)
+            element_path, _, element_name = full_ele.rpartition('/')
             element_parent = root.find(element_path)
             if element_parent is not None:
                 for e in element_parent.findall(element_name):
@@ -283,12 +291,8 @@ class ACBFXML(Tag):
         ns_url = 'http://www.acbf.info/xml/acbf/1.2'
         if xml:
             root: ET.Element = ET.fromstring(xml)
+            self._remove_acbf_xml_namespaces(root)
             root.attrib['xmlns'] = ns_url
-
-            # Remove all namespaces (otherwise all children receive namespace attrib in XML file)
-            for ele in root.iter():
-                if ele.tag.startswith('{'):
-                    ele.tag = ele.tag.split('}')[1]
         else:
             # build a tree structure
             root = ET.Element('ACBF')
@@ -494,13 +498,12 @@ class ACBFXML(Tag):
         if md.year:
             day = md.day or 1
             month = md.month or 1
-            year = str(md.year)
-            if len(year) == 2:
-                if int(year) < 50:
-                    # Presume 20xx
-                    year = '20' + year
-                else:
-                    year = '19' + year
+            year = md.year
+            if int(year) < 50:
+                # Presume 20xx
+                year = 2000 + year
+            elif year < 100:
+                year = 1900 + year
 
             pub_date = f'{year:04}-{month:02}-{day:02}'
             modify_element('meta-data/publish-info/publish-date', pub_date, {'value': pub_date})
@@ -549,7 +552,10 @@ class ACBFXML(Tag):
                     if href is not None:
                         page_dict[href] = b
 
+        # Save the body attributes so we keep the default background color
+        body_attrib = body_node.attrib.copy()
         body_node.clear()
+        body_node.attrib = body_attrib
 
         # pages will be in file name order, not page list order
         md.pages = sorted(md.pages, key=lambda x: x.display_index)
@@ -570,11 +576,9 @@ class ACBFXML(Tag):
         return root
 
     def _convert_xml_to_metadata(self, root: ET.Element, file_list: list[str]) -> GenericMetadata:
-        if not root.tag.endswith('ACBF'):
-            raise Exception('Not an ACBF file')
 
         def get(name: str) -> str | None:
-            tag = root.find('.//' + name, ns)
+            tag = root.find('.//' + name)
             if tag is None:
                 return None
             return tag.text
@@ -582,7 +586,7 @@ class ACBFXML(Tag):
         def get_with_lang(name: str, lang: str = 'en') -> str | None:
             # lang attrib is optional
             if book_info is not None:
-                tags = book_info.findall(name, ns)
+                tags = book_info.findall(name)
                 if len(tags) == 0:
                     return None
 
@@ -608,17 +612,25 @@ class ACBFXML(Tag):
 
             return None
 
+        # We only allow using the specific versions we know we are compatible with
+        acbf_tags = {f'{{{ns}}}ACBF' for ns in self.namespaces}
+        acbf_tags.add('ACBF')
+
+        if str(root.tag) not in acbf_tags:
+            if root.tag.endswith('}ACBF'):
+                raise Exception('Unknown ACBF version: ' + str(root.tag).removesuffix('ACBF').strip('{}'))
+            raise Exception('Not an ACBF file')
+        self._remove_acbf_xml_namespaces(root)
+
         md = GenericMetadata()
 
-        ns = {'': root.tag[1:-5]}
-
-        book_info = root.find('meta-data/book-info', ns)
+        book_info = root.find('meta-data/book-info')
 
         if book_info is None:
             logger.info('No metadata found in ACBF file')
             return md
 
-        seq = book_info.findall('sequence', ns)
+        seq = book_info.findall('sequence')
         if len(seq) > 0:
             # Use first item
             md.series = seq[0].get('title')
@@ -632,13 +644,13 @@ class ACBFXML(Tag):
             md.series = md.title
             md.title = None
 
-        for g in book_info.findall('genre', ns):
+        for g in book_info.findall('genre'):
             if g.text:
                 if g.text.casefold() == 'manga':
                     md.manga = 'Yes'
                 md.genres.add(g.text.replace('_', ' ').casefold())
 
-        anno = book_info.findall('annotation', ns)
+        anno = book_info.findall('annotation')
         for d in anno:
             # Multiple languages, priority is lang attrib: None (missing)->en->whatever is found
             lang = d.get('lang', '')
@@ -653,21 +665,16 @@ class ACBFXML(Tag):
         md.publisher = utils.xlate(get('publisher'))
 
         # Parse date. The `value` field is ISO but the `text` is anything
-        pub_date_tag = root.find('.//publish-date', ns)
-        pub_date_attrib = None
-        if pub_date_tag is not None:
-            pub_date_attrib = pub_date_tag.get('value')
-        if pub_date_attrib is not None:
-            pub_date = pub_date_attrib.split('-')
-            md.year = utils.xlate_int(pub_date[0])
-            md.month = utils.xlate_int(pub_date[1])
-            md.day = utils.xlate_int(pub_date[2])
-        elif pub_date_tag is not None and pub_date_tag.text:
+        pub_date = root.find('.//publish-date')
+        if pub_date is not None:
+            md.day, md.month, md.year = utils.parse_date_str(pub_date.get('value'))
+
+        if md.year is None and pub_date and pub_date.text:
             # Try to parse a year to aid tagging
-            match = re.match(r'\d{4}', pub_date_tag.text)
+            match = re.match(r'\d{4}', pub_date.text)
             md.year = match[0] if match is not None else None
 
-        langs = book_info.findall('languages', ns)
+        langs = book_info.findall('languages')
         if len(langs) > 0:
             md.language = langs[0][0].get('lang')  # Take first for now
 
@@ -675,10 +682,10 @@ class ACBFXML(Tag):
 
         md.tags = set(utils.split(get('keywords'), ','))
 
-        for c in book_info.findall('characters/name', ns):
+        for c in book_info.findall('characters/name'):
             md.characters.add(c.text)
 
-        for dbrefs in book_info.findall('databaseref', ns):
+        for dbrefs in book_info.findall('databaseref'):
             dbtype = dbrefs.get('type')
             if dbtype is not None:
                 # Can't use IssueID or SeriesID realistically
@@ -688,12 +695,12 @@ class ACBFXML(Tag):
         md.identifier = utils.xlate(get('isbn'))
 
         # Now extract the credit info
-        for n in book_info.findall('author', ns):
+        for n in book_info.findall('author'):
             name: str = ''
-            first = n.find('first-name', ns)
-            middle = n.find('middle-name', ns)
-            last = n.find('last-name', ns)
-            nick = n.find('nickname', ns)
+            first = n.find('first-name')
+            middle = n.find('middle-name')
+            last = n.find('last-name')
+            nick = n.find('nickname')
             role = n.get('activity')
 
             if role:
@@ -719,7 +726,7 @@ class ACBFXML(Tag):
                 md.add_credit(name, role)
 
         # history to notes
-        history = root.find('.//history', ns)
+        history = root.find('.//history')
         if history:
             hist_list: list[str] = []
             for h in history:
@@ -728,29 +735,27 @@ class ACBFXML(Tag):
             md.notes = '\n'.join(hist_list)
 
         # source (label scan info)
-        source = root.find('.//source', ns)
+        source = root.find('.//source')
         if source:
             for s in source:
                 if s.text and s.text.startswith('[Scan]'):
                     md.scan_info = s.text[6:]
 
         # parse page data now
-        pages_node = root.findall('body/page', ns)
+        pages_node = root.findall('body/page')
 
         page_file_list: dict[str, int] = {}
         for i, f in enumerate(file_list):
             page_file_list[f] = i
 
         # Cover page is separate for reasons...
-        coverpage = book_info.find('coverpage', ns)
+        coverpage = book_info.find('coverpage')
         if coverpage is not None:
-            image = coverpage.find('image', ns)
-            filename = image.get('href') if image is not None else None
             pages_node.insert(0, coverpage)
 
         for i, page in enumerate(pages_node):
-            image = page.find('image', ns)
-            titles = page.findall('title', ns)
+            image = page.find('image')
+            titles = page.findall('title')
             title = ''
             for t in titles:
                 lang = t.get('lang', '')
@@ -764,6 +769,8 @@ class ACBFXML(Tag):
                     title = t.text
 
             filename = image.get('href', '') if image is not None else ''
+            # Matching the archive_index here _is_ necessary as _currently_ it's what links the page to the rest of the data.
+            # It should change to be archive_index or filename in the future
             archive_index = page_file_list.get(filename)
             if archive_index is None:
                 archive_index = i
