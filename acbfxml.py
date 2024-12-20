@@ -68,6 +68,7 @@ class ACBF(Tag):
             'credits',
             'credits.person',
             'credits.role',
+            'credits.language',
             'data_origin',
             'issue_id',
             'series_id',
@@ -309,10 +310,10 @@ class ACBF(Tag):
 
         for credit in md.credits:
             if credit.role.casefold() in GenericMetadata.writer_synonyms:
-                add_credit(credit.person, 'Writer')
+                add_credit(credit.person, 'Writer', credit.language)
 
             elif credit.role.casefold() in ['adapter']:
-                add_credit(credit.person, 'Adapter')
+                add_credit(credit.person, 'Adapter', credit.language)
 
             elif credit.role.casefold() in ['artist']:
                 add_credit(credit.person, 'Artist')
@@ -330,26 +331,22 @@ class ACBF(Tag):
                 add_credit(credit.person, 'Photographer')
 
             elif credit.role.casefold() in GenericMetadata.letterer_synonyms:
-                add_credit(credit.person, 'Letterer')
+                add_credit(credit.person, 'Letterer', credit.language)
 
             elif credit.role.casefold() in GenericMetadata.cover_synonyms:
                 add_credit(credit.person, 'CoverArtist')
 
             elif credit.role.casefold() in GenericMetadata.editor_synonyms:
-                add_credit(credit.person, 'Editor')
+                add_credit(credit.person, 'Editor', credit.language)
 
             elif credit.role.casefold() in ['assistant editor']:
-                add_credit(credit.person, 'Assistant Editor')
+                add_credit(credit.person, 'Assistant Editor', credit.language)
 
             elif credit.role.casefold() in GenericMetadata.translator_synonyms:
-                if credit.person.endswith(']'):
-                    # Should have a language 2 letter ISO
-                    lang = credit.person[-3:-1]
-                    credit.person = credit.person[:-4]
-                add_credit(credit.person, 'Translator', lang)
+                add_credit(credit.person, 'Translator', credit.language)
 
             else:
-                add_credit(credit.person, 'Other')
+                add_credit(credit.person, 'Other', credit.language)
 
         if md.series:
             for seq in root.findall('meta-data/book-info/sequence'):
@@ -702,6 +699,7 @@ class ACBF(Tag):
             last = n.find('last-name')
             nick = n.find('nickname')
             role = n.get('activity')
+            language = n.get('lang', '')
 
             if role:
                 if role.casefold() == 'coverartist':
@@ -719,11 +717,7 @@ class ACBF(Tag):
                 else:
                     continue
 
-                if role.casefold() == 'translator' and n.get('lang') is not None:
-                    # Need to store language, add to surname in []
-                    name = f'{name} [{n.attrib["lang"]}]'
-
-                md.add_credit(name, role)
+                md.add_credit(name, role, False , language)
 
         # history to notes
         history = root.find('.//history')
