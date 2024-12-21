@@ -33,4 +33,3 @@ jobs:
         run: |
           tox run -m build
           python -m pip install dist/*.whl
-          

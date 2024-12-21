@@ -52,6 +52,7 @@ class ACBF(Tag):
             'description',
             'notes',
             'publisher',
+            'imprint',
             'day',
             'month',
             'year',
@@ -202,7 +203,11 @@ class ACBF(Tag):
                 element = add_path(tag)
             return element
 
-        def modify_element(path: str, value: Any, attribs: dict[str, str] | None = None) -> None:
+        def remove_attribs(ele: ET.Element) -> ET.Element:
+            ele.attrib.clear()
+            return ele
+
+        def modify_element(path: str, value: Any, attribs: dict[str, str] | None = None, clear_attribs: bool = False) -> None:
             attribs = attribs or {}
 
             # Split the path into parent and element name
@@ -218,6 +223,9 @@ class ACBF(Tag):
                 except Exception as e:
                     logger.warning(f'Failed to modify XML element: {element_path}, {element_name}. Error: {e}')
                     return
+
+            if clear_attribs:
+                element = remove_attribs(element)
 
             element.text = str(value)
             for k, v in attribs.items():
@@ -490,7 +498,13 @@ class ACBF(Tag):
             modify_element('meta-data/publish-info/isbn', md.identifier)
 
         if md.publisher:
-            modify_element('meta-data/publish-info/publisher', md.publisher)
+            if md.imprint:
+                modify_element('meta-data/publish-info/publisher', md.publisher, {'imprint': md.imprint})
+            else:
+                modify_element('meta-data/publish-info/publisher', md.publisher, clear_attribs=True)
+
+        else:
+            clear_element('meta-data/publish-info/publisher')
 
         if md.year:
             day = md.day or 1
@@ -659,7 +673,10 @@ class ACBF(Tag):
             elif md.description is None:
                 md.description = annotation_to_string(d)
 
-        md.publisher = utils.xlate(get('publisher'))
+        publisher = root.find('.//publisher')
+        if publisher is not None:
+            md.publisher = utils.xlate(publisher.text)
+            md.imprint = publisher.get('imprint')
 
         # Parse date. The `value` field is ISO but the `text` is anything
         pub_date = root.find('.//publish-date')
@@ -717,7 +734,7 @@ class ACBF(Tag):
                 else:
                     continue
 
-                md.add_credit(name, role, False , language)
+                md.add_credit(name, role, False, language)
 
         # history to notes
         history = root.find('.//history')
