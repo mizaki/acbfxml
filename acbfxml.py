@@ -66,6 +66,8 @@ class ACBF(Tag):
             'pages.bookmark',
             'pages.image_index',
             'characters',
+            'teams',
+            'locations',
             'credits',
             'credits.person',
             'credits.role',
@@ -473,6 +475,18 @@ class ACBF(Tag):
             for c in md.characters:
                 add_element(chars, 'name', c)
 
+        if md.teams:
+            teams = get_or_create_element('meta-data/book-info/teams')
+            teams.clear()
+            for team in md.teams:
+                add_element(teams, 'name', team)
+
+        if md.locations:
+            locs = get_or_create_element('meta-data/book-info/locations')
+            locs.clear()
+            for loc in md.locations:
+                add_element(locs, 'name', loc)
+
         if md.issue_id or md.series_id:
             add_issue: bool = True
             add_series: bool = True
@@ -698,6 +712,12 @@ class ACBF(Tag):
 
         for c in book_info.findall('characters/name'):
             md.characters.add(c.text)
+
+        for t in book_info.findall('teams/name'):
+            md.teams.add(t.text)
+
+        for loc in book_info.findall('locations/name'):
+            md.locations.add(loc.text)
 
         for dbrefs in book_info.findall('databaseref'):
             dbtype = dbrefs.get('type')
