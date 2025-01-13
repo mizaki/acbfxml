@@ -359,10 +359,15 @@ class ACBF(Tag):
                 add_credit(credit.person, 'Other', credit.language)
 
         if md.series:
-            for seq in root.findall('meta-data/book-info/sequence'):
-                # Will presume if the number is the same as md, can be removed and re-added with updated data
-                if seq.text == md.issue:
-                    book_info.remove(seq)
+            sequence = root.findall('meta-data/book-info/sequence')
+            # If there is only one sequence field, replace it. Otherwise, keep all but dupe issue number
+            if len(sequence) == 1:
+                sequence.clear()
+            else:
+                for seq in sequence:
+                    # Will presume if the number is the same as md, can be removed and re-added with updated data
+                    if seq.text == md.issue:
+                        book_info.remove(seq)
 
             element = ET.SubElement(book_info, 'sequence')
             element.attrib['title'] = md.series
@@ -374,15 +379,15 @@ class ACBF(Tag):
         if md.title:
             cur_titles: list[ET.Element] = root.findall('meta-data/book-info/book-title')
             found = False
+            # Clear any 'en' or no language field to be replaced with new
             for title in cur_titles:
-                if title.text == md.title:
-                    found = True
-                    break
-            if not found:
-                element = ET.SubElement(book_info, 'book-title')
-                element.text = md.title
-                if md.language:
-                    element.attrib['lang'] = md.language
+                if title.attrib.get('lang') is None or title.attrib.get('lang') == 'en':
+                    title.clear()
+
+            element = ET.SubElement(book_info, 'book-title')
+            element.text = md.title
+            if md.language:
+                element.attrib['lang'] = md.language
 
         allow_genres = [
             'other', 'adult', 'adventure', 'alternative', 'artbook', 'biography', 'caricature', 'children',
