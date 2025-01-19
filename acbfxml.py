@@ -57,6 +57,7 @@ class ACBF(Tag):
             'month',
             'year',
             'language',
+            'format',
             'web_links',
             'manga',
             'maturity_rating',
@@ -419,6 +420,32 @@ class ACBF(Tag):
                 else:
                     add_element(book_info, 'genre', g)
 
+        # Allowed formats: Annual, Collected Edition (TPB, Omnibus, Anthology, etc.), Graphic Novel, One-Shot,
+        # Single Issue, Webcomic, Other
+        format_dict = {
+            'annual': 'Annual', 'collected edition': 'Collected Edition', 'graphic novel': 'Graphic Novel',
+            'oneshot': 'One-Shot', 'single issue': 'Single Issue', 'webcomic': 'Web Comic', 'other': 'Other',
+        }
+
+        format_tpb = ['collected edition', 'tpb', 'omnibus', 'anthology', 'trade paperback', 'trade paper back']
+        format_one_shot = ['oneshot', 'one-shot', 'one shot', '1-shot', '1 shot', '1shot']
+        format_webcomic = ['webcomic', 'web comic']
+
+        # Must be clear or set
+        clear_element('meta-data/book-info/publishing-format')
+
+        if md.format:
+            if md.format.lower().casefold() in format_tpb:
+                md.format = format_tpb[0]
+            elif md.format.lower().casefold() in format_one_shot:
+                md.format = format_one_shot[0]
+            elif md.format.lower().casefold() in format_webcomic:
+                md.format = format_webcomic[0]
+
+            md.format = format_dict.get(md.format.lower().casefold(), 'Other')
+
+            add_element(book_info, 'publishing-format', md.format)
+
         if md.description:
             cur_annos: list[ET.Element] = root.findall('meta-data/book-info/annotation')
             found = False
@@ -679,6 +706,8 @@ class ACBF(Tag):
                 if g.text.casefold() == 'manga':
                     md.manga = 'Yes'
                 md.genres.add(g.text.replace('_', ' ').casefold())
+
+        md.format = utils.xlate(get('publishing-format'))
 
         anno = book_info.findall('annotation')
         for d in anno:
